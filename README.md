@@ -4,7 +4,7 @@ Git is free and open source distributed version control system designed to handl
 
 ### Advantages
 
-- Tracking Chnages
+- Tracking Changes
 - Managing project code
 - Working with multiple members
 
