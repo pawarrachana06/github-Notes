@@ -316,6 +316,16 @@ This command pushes a specific Git tag from your local repository to a remote re
 
 ` git push origin tagname `
 
+
+## Cherry pick
+- Apply a specific commit from another branch
+Brings in the changes from a specific commit without merging the entire branch
+
+
+``` git cherry-pick commitHash ```
+
+
+
 ## Fork
 A fork is a personal copy of someone else's Git repository. It allows you to:
 
