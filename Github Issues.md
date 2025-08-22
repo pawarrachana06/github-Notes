@@ -356,3 +356,226 @@ git push origin <branch>
   * Unrelated histories → `git pull --allow-unrelated-histories`
 
 ---
+
+---
+
+## 🧭 14. Rebase & Pull Strategies — the **true / false / ff-only** trilogy
+
+When you run `git pull`, Git needs to reconcile your local branch with the remote. There are **three main strategies** you can choose from via flags or config:
+
+| Goal                                   | How to set (one-time)                   | One-off command        | What it does                                                                      | Typical use                                                                    |
+| -------------------------------------- | --------------------------------------- | ---------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| **Merge (pull.rebase = false)**        | `git config --global pull.rebase false` | `git pull --no-rebase` | Creates a **merge commit** when needed.                                           | Teams that prefer visible merge commits and do not rewrite history.            |
+| **Rebase (pull.rebase = true)**        | `git config --global pull.rebase true`  | `git pull --rebase`    | **Replays** your local commits **on top** of the remote; keeps history linear.    | Feature branches; cleaner history; fewer merge commits.                        |
+| **Fast-forward only (pull.ff = only)** | `git config --global pull.ff only`      | `git pull --ff-only`   | **Refuses to create** a merge commit; **aborts** if fast-forward is not possible. | Protect `main`/`trunk` from accidental merges; enforce pre-rebase before pull. |
+
+> Per-branch setting (recommended): `git config branch.<name>.rebase true` (or `false`).
+
+### Suggested policy
+
+* On **feature branches**: `pull.rebase = true` (or always use `git pull --rebase`).
+* On **main**: `pull.ff = only` to prevent accidental local merges into main.
+
+### Related merge flags (when integrating features):
+
+* `--ff-only` → fail if not FF; `--no-ff` → always create merge commit; default `--ff` tries to FF, else creates a merge commit.
+
+---
+
+## 🧩 15. Rebase Edge Cases & Fixes (think: all the ways it can go sideways)
+
+### 15.1 Rebase stops: *“You have unstaged changes”*
+
+**Cause:** Local modifications conflict with rebase.
+**Fix:**
+
+```bash
+git status
+# Option A: keep and auto-stash during pull
+git pull --rebase --autostash
+# Option B: manual
+git stash -u && git rebase origin/main && git stash pop
+```
+
+### 15.2 Rebase conflicts on many commits
+
+**Fix loop:**
+
+```bash
+git rebase origin/main
+# Resolve files (use IDE or):
+#   pick mine:    git checkout --ours  <file>
+#   pick theirs:  git checkout --theirs <file>
+# or use strategy option cautiously: -X ours | -X theirs
+
+git add <file(s)>
+git rebase --continue      # or --skip for an unimportant commit
+# bail out if too messy:
+git rebase --abort
+```
+
+**Tip:** enable conflict reuse: `git config --global rerere.enabled true`.
+
+### 15.3 *Dropped commit* after rebase
+
+**Symptoms:** Something you had locally is gone.
+**Recovery:**
+
+```bash
+# Recover with reflog
+git reflog
+# Find pre-rebase HEAD, then:
+git checkout -b rescue <that_sha>
+# cherry-pick the lost commit(s) onto your branch
+```
+
+### 15.4 Force-push required after rebase
+
+**Reason:** Rebasing rewrites commit SHAs. Remote rejects push.
+**Safe push:**
+
+```bash
+git push --force-with-lease origin <branch>
+```
+
+> Use `--force-with-lease` (not plain `--force`) to avoid overwriting teammates’ work.
+
+### 15.5 *“fatal: Not possible to fast-forward, aborting”* when pulling with `--ff-only`
+
+**Cause:** Your local branch has unique commits; FF is impossible.
+**Fix:** Rebase your commits on top of remote, then push.
+
+```bash
+git fetch origin
+git rebase origin/<branch>
+# then
+git push
+```
+
+### 15.6 *“hint: You have divergent branches and need to specify how to reconcile them.”*
+
+**Cause:** Newer Git requires you to choose a strategy.
+**Fix (pick one policy):**
+
+```bash
+# Merge style
+git config --global pull.rebase false
+# or Rebase style
+git config --global pull.rebase true
+# or FF-only
+git config --global pull.ff only
+```
+
+### 15.7 Rebasing branches that contain **merge commits**
+
+**Problem:** Default rebase flattens merges.
+**Fix:** Preserve merges explicitly.
+
+```bash
+git rebase --rebase-merges origin/main
+# (old/legacy: --preserve-merges)
+```
+
+### 15.8 Interactive rebase pitfalls (`-i`)
+
+* **Squashing/rewriting history** means you will need `--force-with-lease` to push.
+* **Changing commit order** can break builds/tests; run tests before force-pushing.
+* **Fixup/squash workflow:**
+
+```bash
+git commit --fixup <sha>
+git rebase -i --autosquash origin/main
+```
+
+### 15.9 Rebase across a **force-pushed** upstream
+
+**Symptoms:** Confusing conflicts; your upstream rewrote history.
+**Approach:**
+
+```bash
+git fetch origin
+# create a safety copy before rebasing onto the new upstream
+git checkout -b backup-before-upstream-change
+# then rebase
+git checkout <your-branch>
+git rebase origin/main
+```
+
+### 15.10 Binary or large-file conflicts during rebase
+
+* Prefer “ours/theirs” resolution to avoid corrupting binaries.
+
+```bash
+git checkout --theirs path/to/asset.bin
+# or
+git checkout --ours  path/to/asset.bin
+```
+
+### 15.11 Aborted mid-rebase and stuck state
+
+**Fix:**
+
+```bash
+git rebase --abort       # safest reset
+# If still stuck, cleanup rebase metadata:
+rm -rf .git/rebase-apply .git/rebase-merge
+```
+
+### 15.12 Rebase vs Merge policy drift
+
+**Symptom:** Some devs merge, others rebase → noisy history.
+**Fix:** Enforce with repo config & CI checks.
+
+* Protect `main` and require **FF-only**.
+* Document standard: *feature branches rebase before PR; merges into main use `--no-ff` or squash*.
+
+### 15.13 Preserve authorship & dates
+
+* Rebasing preserves **author**; **committer date** changes (expected).
+* If you amend author:
+
+```bash
+git commit --amend --author="Name <email>"
+```
+
+### 15.14 Autosync on pull for busy repos
+
+* `git pull --rebase --autostash` reduces friction when you forget to stash.
+* Consider alias:
+
+```bash
+git config --global alias.up "pull --rebase --autostash"
+```
+
+---
+
+## 🧾 16. Ready-to-copy `.gitconfig` snippets
+
+```ini
+# Enforce linear feature branches\ n[pull]
+    rebase = true
+
+# Protect main from accidental merges
+[branch "main"]
+    ff = only
+
+# Prefer safer force pushes
+[push]
+    default = current
+
+# Reuse recorded conflict resolutions
+[rerere]
+    enabled = true
+```
+
+> Per-branch rebase: `git config branch.<branch>.rebase true`.
+
+---
+
+## ⚡ Quick Decision: true vs false vs ff-only
+
+* **`pull.rebase = true`** → You want **linear history** on **feature branches**.
+* **`pull.rebase = false`** → You accept **merge commits** and want to avoid rewriting history.
+* **`pull.ff = only`** → You want **safety on main**; disallow accidental merges; force devs to rebase first.
+
+---
